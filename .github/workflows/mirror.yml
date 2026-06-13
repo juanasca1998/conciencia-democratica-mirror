@@ -1,0 +1,75 @@
+name: Mirror estático
+
+on:
+  schedule:
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generar mirror
+        run: |
+          mkdir -p _site
+          cd _site
+          BASE="https://conciencia-democratica.vercel.app"
+
+          for path in "/" "/autores" "/opinion" "/letras" "/archivo" "/biblioteca" "/multimedia" "/origen" "/glosario" "/categorias" "/status"; do
+            target_dir=".$path"
+            mkdir -p "$target_dir"
+            curl -sL "$BASE$path" -o "$target_dir/index.html" --max-time 30 || echo "  WARN: $path"
+          done
+
+          # Sitemap → artículos / autores / categorías / temas
+          curl -sL "$BASE/sitemap.xml" -o sitemap.xml --max-time 30 || true
+          if [ -s sitemap.xml ]; then
+            grep -oE '<loc>[^<]+</loc>' sitemap.xml | sed 's/<loc>//;s/<\/loc>//' | \
+              grep -E "(articulos|autores/|categoria/|temas/)" | sort -u | while read url; do
+                path="${url#$BASE}"
+                path="${path%%\?*}"
+                [ -z "$path" ] && continue
+                target_dir=".$path"
+                mkdir -p "$target_dir"
+                curl -sL "$url" -o "$target_dir/index.html" --max-time 30 || true
+                sleep 0.2
+              done
+          fi
+
+          # Re-escribir links absolutos a relativos
+          find . -name "*.html" -exec sed -i 's|https://conciencia-democratica\.vercel\.app/|/|g' {} \;
+
+          # Banner de mirror
+          for f in $(find . -name "index.html"); do
+            sed -i 's|</body>|<div style="position:fixed;bottom:8px;right:8px;background:#7a1f1f;color:#fff;padding:6px 12px;font:11px/1.4 system-ui;border-radius:4px;z-index:9999;opacity:0.92">Versión mirror • <a href="https://conciencia-democratica.vercel.app" style="color:#fff;text-decoration:underline">Sitio en vivo</a></div></body>|' "$f" || true
+          done
+
+          # robots.txt para no indexar el mirror (evitar duplicate content)
+          cat > robots.txt << 'ROBOTS'
+User-agent: *
+Disallow: /
+ROBOTS
+
+          # Resumen
+          echo "Páginas: $(find . -name index.html | wc -l), tamaño: $(du -sh . | cut -f1)"
+
+      - uses: actions/configure-pages@v5
+        continue-on-error: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - uses: actions/deploy-pages@v4
+        continue-on-error: true
