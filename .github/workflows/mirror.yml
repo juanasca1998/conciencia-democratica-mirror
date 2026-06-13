@@ -27,13 +27,13 @@ jobs:
           cd _site
           BASE="https://conciencia-democratica.vercel.app"
 
-          # Pages top-level
+          # Páginas top-level
           for p in "" autores opinion letras archivo biblioteca multimedia origen glosario categorias status; do
             mkdir -p "./$p"
             curl -sL "$BASE/$p" -o "./$p/index.html" --max-time 30 || true
           done
 
-          # Sitemap → artículos
+          # Sitemap → artículos / autores / categorías / temas
           curl -sL "$BASE/sitemap.xml" -o sitemap.xml --max-time 30 || true
           if [ -s sitemap.xml ]; then
             grep -oE '<loc>[^<]+</loc>' sitemap.xml | sed 's/<loc>//' | sed 's|</loc>||' | grep -E "(articulos|autores/|categoria/|temas/)" | sort -u | while read url; do
@@ -46,13 +46,68 @@ jobs:
             done
           fi
 
-          # Rewrite absolute → relative links
+          # Re-escribir links absolutos a relativos
           find . -name '*.html' -exec sed -i 's|https://conciencia-democratica\.vercel\.app/|/|g' {} \;
 
-          # robots.txt evitar indexar el mirror
+          # Inyectar script de health check + banner mirror al final del <body>
+          # El script intenta fetch al sitio principal; si responde 200, muestra
+          # banner "sitio principal vivo: click acá". Si no, banner "modo mirror".
+          BANNER='<div id="cd-mirror-banner" style="position:fixed;bottom:0;left:0;right:0;background:#7a1f1f;color:#fff;padding:10px 16px;font:13px/1.4 Georgia,serif;text-align:center;z-index:99999;box-shadow:0 -2px 8px rgba(0,0,0,0.15)"><span id="cd-mirror-msg">Estás viendo el archivo espejo del sitio. <a href="https://conciencia-democratica.vercel.app" style="color:#fff;text-decoration:underline">Probar el sitio principal →</a></span></div><script>(function(){var c=document.getElementById("cd-mirror-msg");if(!c)return;fetch("https://conciencia-democratica.vercel.app/api/health",{cache:"no-store",signal:AbortSignal.timeout(4000)}).then(function(r){if(r.ok){c.innerHTML="Sitio principal disponible. <a href=\"https://conciencia-democratica.vercel.app\" style=\"color:#fff;text-decoration:underline\">Ir al sitio en vivo →</a>";}else{c.innerHTML="El sitio principal está temporalmente fuera. Estás leyendo el archivo espejo. Las funciones interactivas (login, comentarios) no están disponibles acá.";}}).catch(function(){c.innerHTML="El sitio principal está temporalmente fuera. Estás leyendo el archivo espejo. Las funciones interactivas (login, comentarios) no están disponibles acá.";});})();</script>'
+
+          for f in $(find . -name "*.html"); do
+            sed -i "s|</body>|${BANNER}</body>|" "$f" || true
+          done
+
+          # robots.txt — evitar indexar el mirror (duplicate content)
           printf 'User-agent: *\nDisallow: /\n' > robots.txt
 
           echo "Páginas: $(find . -name index.html | wc -l) — tamaño: $(du -sh . | cut -f1)"
+
+      - name: Página 404 personalizada
+        run: |
+          cat > _site/404.html << 'EOF404'
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Página no disponible · Revista Conciencia Democrática</title>
+<meta name="robots" content="noindex">
+<style>
+body{font-family:Georgia,serif;background:#d9d6cf;color:#171717;margin:0;padding:0;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.box{max-width:560px;padding:48px 40px;background:#fff;border:1px solid rgba(122,31,31,0.18);box-shadow:0 4px 24px rgba(0,0,0,0.08);margin:24px}
+h1{font-size:28px;margin:0 0 8px;color:#7a1f1f;letter-spacing:1px}
+.subtitle{font-size:14px;color:#666;font-style:italic;margin:0 0 32px}
+.divider{width:48px;height:2px;background:#c9a96e;margin:24px 0}
+p{font-size:16px;line-height:1.65;margin:0 0 16px}
+a{color:#7a1f1f}
+.note{font-size:13px;color:#666;margin-top:32px;padding-top:24px;border-top:1px solid #eee}
+ul{padding-left:20px}
+li{margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="box">
+<h1>Página no encontrada</h1>
+<p class="subtitle">Revista Conciencia Democrática · Archivo espejo</p>
+<div class="divider"></div>
+<p>Esta página no existe en el archivo espejo, o el sitio principal todavía no la indexó.</p>
+<p>Probá una de estas secciones:</p>
+<ul>
+<li><a href="/">Inicio</a></li>
+<li><a href="/autores/">Autores</a></li>
+<li><a href="/opinion/">Opinión</a></li>
+<li><a href="/letras/">Letras</a></li>
+<li><a href="/archivo/">Archivo</a></li>
+<li><a href="/biblioteca/">Biblioteca</a></li>
+</ul>
+<div class="note">
+<p>Si el sitio principal está disponible, podés ir directo a <a href="https://conciencia-democratica.vercel.app">conciencia-democratica.vercel.app</a> para acceder a la versión completa (login, comentarios, admin).</p>
+</div>
+</div>
+</body>
+</html>
+EOF404
+          echo "404.html creado"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
